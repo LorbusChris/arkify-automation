@@ -1,0 +1,28 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:best-practices',
+  ],
+  // actions/checkout and friends get sha-pinned and bumped; the Fedora
+  // container in rebase.yml gets version PRs (44 -> 45) without daily
+  // digest churn -- the same rule bluespin's config uses. The kernel
+  // itself needs no Renovate: release detection and rebasing are this
+  // repo's own job.
+  packageRules: [
+    {
+      enabled: false,
+      matchUpdateTypes: [
+        'digest',
+        'pinDigest',
+        'pin',
+      ],
+      matchDepTypes: [
+        'container',
+      ],
+      matchFileNames: [
+        '.github/workflows/**.yaml',
+        '.github/workflows/**.yml',
+      ],
+    },
+  ],
+}
