@@ -28,7 +28,7 @@ jobs:
     outputs:
       matrix: ${{ steps.d.outputs.matrix }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: credential health check (daily; deploy keys do not expire, but
               they can be revoked - find out today, not on release day)
         env:
@@ -75,7 +75,7 @@ jobs:
           dnf -y install git make gcc flex bison bzip2 dwarves xz rpm-build
           python3-pyyaml rust rust-src bindgen rustfmt curl gh awk
           openssh-clients
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: load config
         run: |
           grep -v '^#' config.env >> "$GITHUB_ENV"
