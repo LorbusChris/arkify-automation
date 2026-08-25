@@ -29,6 +29,25 @@ jobs:
       matrix: ${{ steps.d.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+      - name: credential health check (daily; deploy keys do not expire, but
+              they can be revoked - find out today, not on release day)
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source config.env
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          if ! git ls-remote "git@github.com:$KERNEL_REPO_SLUG" HEAD >/dev/null 2>&1; then
+            title="deploy key for $KERNEL_REPO_SLUG no longer authenticates"
+            exists=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+                       --search "in:title \"$title\"" --json number --jq '.[0].number')
+            [ -n "$exists" ] || gh issue create -R "$GITHUB_REPOSITORY" --title "$title" \
+              --body "The DEPLOY_KEY secret failed SSH auth against $KERNEL_REPO_SLUG. Re-create the deploy key (repo settings -> Deploy keys, allow write) and update the DEPLOY_KEY secret here. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            exit 1
+          fi
+          echo "deploy key OK"
       - id: d
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,16 +74,25 @@ jobs:
         run: >
           dnf -y install git make gcc flex bison bzip2 dwarves xz rpm-build
           python3-pyyaml rust rust-src bindgen rustfmt curl gh awk
+          openssh-clients
       - uses: actions/checkout@v4
-      - name: load target config
-        run: cat targets/${{ matrix.target }}.env >> "$GITHUB_ENV"
+      - name: load config
+        run: |
+          grep -v '^#' config.env >> "$GITHUB_ENV"
+          grep -v '^#' targets/${{ matrix.target }}.env >> "$GITHUB_ENV"
+      - name: set up the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
       - name: rebase + arkify + smoke test + ship
         id: run
         env:
           NEW_VERSION: ${{ matrix.version }}
           OLD_VERSION: ${{ matrix.old }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
         run: bash scripts/rebase-target.sh
       - name: open issue on rebase conflict
         if: failure()

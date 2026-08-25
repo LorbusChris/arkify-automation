@@ -43,8 +43,17 @@ upstream patch-stack resyncs, and any rebase conflict.
 
 ## Setup
 
-- Secret `PUSH_TOKEN`: fine-grained PAT, `contents: write` on
-  `LorbusChris/linux` only.
+- [config.env](config.env) — `KERNEL_REPO_SLUG` names the kernel repository
+  everything operates on (branches, deploy key, health check). Change it there;
+  nothing else hardcodes the repo.
+- Secret `DEPLOY_KEY`: the private half of an SSH **deploy key** on
+  `LorbusChris/linux` (repo Settings → Deploy keys, *allow write*). Deploy keys
+  never expire, so there is no renewal treadmill; the `detect` job additionally
+  SSH-probes the key **daily** and opens an issue the day it stops
+  authenticating (revoked/deleted), so breakage surfaces long before a release
+  needs it. To rotate: `ssh-keygen -t ed25519 -N ""`, add the public half as a
+  new deploy key, `gh secret set DEPLOY_KEY -R LorbusChris/arkify-automation <
+  private-key-file`, delete the old key.
 - COPR side (already done, for the record): package committish = consumption
   branch, `--webhook-rebuild on`, and the per-project GitHub webhook URL
   (COPR project → Settings → Integrations) added to the kernel repo's webhooks.

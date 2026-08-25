@@ -13,7 +13,12 @@
 # see docs/arkify-sop.md §7 in the kernel repo's arkify-local-infra-* branches.
 set -euo pipefail
 
-KERNEL_REPO=${KERNEL_REPO:-https://github.com/LorbusChris/linux}
+# precedence: environment > config.env > built-in default
+_slug_override=${KERNEL_REPO_SLUG:-}
+# shellcheck disable=SC1091
+[ -f "$(dirname "$0")/../config.env" ] && source "$(dirname "$0")/../config.env"
+KERNEL_REPO_SLUG=${_slug_override:-${KERNEL_REPO_SLUG:-LorbusChris/linux}}
+KERNEL_REPO=${KERNEL_REPO:-https://github.com/$KERNEL_REPO_SLUG}
 TARGET_DIR=$(dirname "$0")/../targets
 FORCE_TARGET=${FORCE_TARGET:-}   # workflow_dispatch override
 FORCE_VERSION=${FORCE_VERSION:-} # workflow_dispatch override

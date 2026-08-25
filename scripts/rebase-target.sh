@@ -10,14 +10,21 @@
 #   OLD_VERSION  current X.Y.Z (from detect.sh)
 #   CONSUMPTION  consumption branch (copr-sc7280 / copr-surface)
 #   DRY_RUN      "true" -> push rehearsal/* refs, skip the consumption push
-#   PUSH_TOKEN   fine-grained PAT with contents:write on the kernel repo
+#   Auth: SSH deploy key for the kernel repo, configured by the workflow
+#   (key file + GIT_SSH_COMMAND). Deploy keys do not expire.
 #
 # Exit codes: 0 ok, 2 rebase conflict (details in $GITHUB_WORKSPACE/conflict.txt),
 #             1 anything else. Runs on Fedora only (arkify requirement).
 set -euo pipefail
 say() { echo "==> $*"; }
 
-: "${TARGET:?}" "${NEW_VERSION:?}" "${OLD_VERSION:?}" "${CONSUMPTION:?}" "${PUSH_TOKEN:?}"
+: "${TARGET:?}" "${NEW_VERSION:?}" "${OLD_VERSION:?}" "${CONSUMPTION:?}"
+# precedence: environment > config.env > built-in default
+_slug_override=${KERNEL_REPO_SLUG:-}
+# shellcheck disable=SC1091
+[ -f "$(dirname "$0")/../config.env" ] && source "$(dirname "$0")/../config.env"
+KERNEL_REPO_SLUG=${_slug_override:-${KERNEL_REPO_SLUG:-LorbusChris/linux}}
+KERNEL_PUSH_URL=${KERNEL_PUSH_URL:-git@github.com:$KERNEL_REPO_SLUG}
 DRY_RUN=${DRY_RUN:-false}
 WORKDIR=${WORKDIR:-$PWD/kwork}
 CONFLICT_OUT=${GITHUB_WORKSPACE:-$PWD}/conflict.txt
@@ -35,7 +42,7 @@ OLD_INFRA=arkify-local-infra-$OLD_PIN
 NEW_INFRA=arkify-local-infra-$NEW_PIN
 
 say "clone (blobless, full history)"
-git clone --filter=blob:none "https://x-access-token:${PUSH_TOKEN}@github.com/LorbusChris/linux" "$WORKDIR"
+git clone --filter=blob:none "$KERNEL_PUSH_URL" "$WORKDIR"
 cd "$WORKDIR"
 git config user.name  "arkify-automation"
 git config user.email "arkify-automation@noreply.github.com"
