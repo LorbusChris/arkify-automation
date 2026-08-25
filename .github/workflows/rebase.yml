@@ -1,0 +1,93 @@
+name: rebase
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily; kernel.org stable releases land at all hours
+  workflow_dispatch:
+    inputs:
+      target:
+        description: target to act on
+        type: choice
+        options: [all, sc7280, surface]
+        default: all
+      version:
+        description: force a version X.Y.Z (skip kernel.org detection)
+        required: false
+      dry_run:
+        description: push rehearsal/* refs only, never the consumption branch
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.d.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_TARGET: ${{ inputs.target }}
+          FORCE_VERSION: ${{ inputs.version }}
+        run: bash scripts/detect.sh
+
+  rebase:
+    needs: detect
+    if: needs.detect.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    # one rebase per target at a time; a slow run and the next cron tick must
+    # not double-push. Never cancel a running rebase mid-push.
+    concurrency:
+      group: rebase-${{ matrix.target }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: install build deps (the proven .copr/Makefile set + tooling)
+        run: >
+          dnf -y install git make gcc flex bison bzip2 dwarves xz rpm-build
+          python3-pyyaml rust rust-src bindgen rustfmt curl gh awk
+      - uses: actions/checkout@v4
+      - name: load target config
+        run: cat targets/${{ matrix.target }}.env >> "$GITHUB_ENV"
+      - name: rebase + arkify + smoke test + ship
+        id: run
+        env:
+          NEW_VERSION: ${{ matrix.version }}
+          OLD_VERSION: ${{ matrix.old }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+        run: bash scripts/rebase-target.sh
+      - name: open issue on rebase conflict
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="[${{ matrix.target }}] ${{ matrix.version }} rebase needs a human"
+          exists=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
+                     --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -z "$exists" ]; then
+            { cat conflict.txt 2>/dev/null || echo "No conflict details captured - see the workflow log."; \
+              echo; echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; } |
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file -
+          fi
+      - name: job summary
+        if: success()
+        run: |
+          {
+            echo "### ${{ matrix.target }} -> ${{ matrix.version }}"
+            echo "- pinned branch: \`linux-${{ matrix.version }}-${{ matrix.target }}-arkify\`"
+            if [ "${{ inputs.dry_run || 'false' }}" = "true" ]; then
+              echo "- DRY RUN: rehearsal/* refs pushed, no COPR build triggered"
+            else
+              echo "- consumption branch \`$CONSUMPTION\` pushed -> COPR builds: https://copr.fedorainfracloud.org/coprs/g/mobility/${{ matrix.target }}/builds/"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
