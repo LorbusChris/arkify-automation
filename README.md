@@ -48,7 +48,7 @@ Everything reports through issues in this repo:
 | event | channel |
 |---|---|
 | latest COPR build status, both targets | the persistent **“COPR build dashboard”** issue — body edited in place every 6h by [copr-watch](.github/workflows/copr-watch.yml); a comment (→ notification) is added only on state changes, so each build success/failure pings exactly once |
-| COPR build **failed** | additionally its own issue, deduplicated by build id, with failed chroots + log links |
+| COPR build **failed** | one issue per failed *rebase* — “\[target\] Kernel Release vX.Y.Z failed to build” — collecting every failed build of that release (first in the body, later ones as comments, deduplicated by build id). Solve and close it manually; a further failure of the same release reopens it, a different release opens a fresh issue |
 | rebase conflict / rebase job failure | issue with the conflicting files, plus GitHub’s built-in failed-scheduled-workflow email |
 | new upstream series appeared | notify-only issue |
 | deploy key stopped authenticating | issue from the daily health probe |

@@ -100,9 +100,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           title="[${{ matrix.target }}] ${{ matrix.version }} rebase needs a human"
-          exists=$(gh issue list -R "$GITHUB_REPOSITORY" --state open \
-                     --search "in:title \"$title\"" --json number --jq '.[0].number')
-          if [ -z "$exists" ]; then
+          # exact-title match via the list API - the search API's index lags
+          exists=$(gh issue list -R "$GITHUB_REPOSITORY" --state open -L 500 --json title |
+                   T="$title" python3 -c 'import json,os,sys; print(sum(1 for i in json.load(sys.stdin) if i["title"] == os.environ["T"]))')
+          if [ "$exists" = "0" ]; then
             { cat conflict.txt 2>/dev/null || echo "No conflict details captured - see the workflow log."; \
               echo; echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; } |
             gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file -

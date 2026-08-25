@@ -46,10 +46,10 @@ git clone --filter=blob:none "$KERNEL_PUSH_URL" "$WORKDIR"
 cd "$WORKDIR"
 git config user.name  "arkify-automation"
 git config user.email "arkify-automation@noreply.github.com"
+git remote add stable https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 git fetch --quiet origin "refs/tags/$NEW_TAG:refs/tags/$NEW_TAG" || true
 git rev-parse -q --verify "$NEW_TAG" >/dev/null || {
     say "tag $NEW_TAG not in the kernel repo yet - fetching from stable"
-    git remote add stable https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
     git fetch --quiet stable "refs/tags/$NEW_TAG:refs/tags/$NEW_TAG"
 }
 
@@ -131,6 +131,17 @@ if [ "$DRY_RUN" = "true" ]; then
                        "refs/heads/$NEW_INFRA:refs/heads/rehearsal/$NEW_INFRA"
     echo "rehearsal tree: $(git rev-parse "$NEW_PIN^{tree}")"
 else
+    say "ship: tag + mirror first - COPR's MARKER resolution needs $NEW_TAG in the fork"
+    # The release tag MUST reach the fork before the consumption push: COPR's
+    # clone resolves 'override UPSTREAM_BRANCH = $(MARKER)' against it. Also
+    # refresh the linux-X.Y.y upstream mirror branch while we are here so the
+    # fork's stable-series mirror does not rot (best effort - the branch does
+    # not exist upstream until X.Y.1).
+    git push origin "refs/tags/$NEW_TAG:refs/tags/$NEW_TAG"
+    if git fetch --quiet stable "refs/heads/linux-$SERIES.y:refs/remotes/stable/linux-$SERIES.y" 2>/dev/null; then
+        git push origin "refs/remotes/stable/linux-$SERIES.y:refs/heads/linux-$SERIES.y" ||
+            echo "WARNING: mirror refresh of linux-$SERIES.y failed (diverged?); continuing"
+    fi
     say "ship: pinned + infra branches, then the consumption branch (triggers COPR)"
     git push origin "refs/heads/$NEW_PIN:refs/heads/$NEW_PIN" \
                     "refs/heads/$NEW_INFRA:refs/heads/$NEW_INFRA"

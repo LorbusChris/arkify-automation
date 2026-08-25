@@ -57,7 +57,12 @@ current_version() { # $1 = target
 
 open_issue_once() { # $1 = title, $2 = body
     [ -n "${GITHUB_REPOSITORY:-}" ] || { echo "NOTIFY: $1"; return; }
-    if [ -z "$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$1\"" --json number --jq '.[0].number')" ]; then
+    # exact-title match via the list API - the search API's index lags
+    local existing
+    existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open -L 500 --json title |
+               T="$1" python3 -c 'import json,os,sys
+print(sum(1 for i in json.load(sys.stdin) if i["title"] == os.environ["T"]))')
+    if [ "$existing" = "0" ]; then
         gh issue create -R "$GITHUB_REPOSITORY" --title "$1" --body "$2"
     fi
 }
