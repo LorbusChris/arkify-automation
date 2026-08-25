@@ -19,7 +19,8 @@ _slug_override=${KERNEL_REPO_SLUG:-}
 [ -f "$(dirname "$0")/../config.env" ] && source "$(dirname "$0")/../config.env"
 KERNEL_REPO_SLUG=${_slug_override:-${KERNEL_REPO_SLUG:-LorbusChris/linux}}
 KERNEL_REPO=${KERNEL_REPO:-https://github.com/$KERNEL_REPO_SLUG}
-TARGET_DIR=$(dirname "$0")/../targets
+TARGET_DIR=${TARGET_DIR:-$(dirname "$0")/../targets}
+ARKIFY_REMOTE=${ARKIFY_REMOTE:-https://gitlab.com/knurd42/linux.git/}
 FORCE_TARGET=${FORCE_TARGET:-}   # workflow_dispatch override
 FORCE_VERSION=${FORCE_VERSION:-} # workflow_dispatch override
 
@@ -86,10 +87,34 @@ for env in "$TARGET_DIR"/*.env; do
     echo "$TARGET: current=$curN latest=$newN"
     if [ -n "$new" ] && [ "$newN" != "$curN" ] && \
        [ "$(printf '%s\n%s\n' "$curN" "$newN" | sort -V | tail -1)" = "$newN" ]; then
-        matrix=$(echo "$matrix" | python3 -c "
+        # ---- ark-infra readiness gate ----
+        # A stable point release (Z>=1) is built with arkify's stable-X.Y
+        # infrastructure, which knurd42 derives from Fedora's kernel-ark.
+        # Until arkify-infra-stable-X.Y exists there, building would rush
+        # ahead of what the Fedora ark infra supports (arkify would fall back
+        # to mainline infra and the rebase job's kind check would fail late).
+        # Wait instead: notify once, skip, and let the next cron proceed the
+        # day the branch appears. X.Y.0 series jumps are manual (SOP §7) and
+        # use mainline infra, which always exists - no gate needed there.
+        gate_wait=""
+        case "$newN" in
+        *.*.0) ;;
+        *)  ser=${newN%.*}
+            if ! git ls-remote --heads "$ARKIFY_REMOTE" "refs/heads/arkify-infra-stable-$ser" | grep -q .; then
+                gate_wait=1
+                open_issue_once \
+                    "[$TARGET] waiting for arkify-infra-stable-$ser before building v$newN" \
+                    "kernel.org has v$newN, but knurd42's arkify-infra-stable-$ser branch does not exist yet, so the Fedora ark infrastructure is not ready for this series. The rebase is on hold and will start automatically on a later run once the branch appears - no action needed. Close this once the build lands."
+                echo "$TARGET: v$newN gated - arkify-infra-stable-$ser not available yet"
+            fi
+            ;;
+        esac
+        if [ -z "$gate_wait" ]; then
+            matrix=$(echo "$matrix" | python3 -c "
 import json,sys; m=json.load(sys.stdin)
 m.append({'target':'$TARGET','version':'$newN','old':'$curN'})
 print(json.dumps(m))")
+        fi
     fi
 
     # ---- notify-only: new upstream series ----

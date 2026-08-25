@@ -30,7 +30,16 @@ git push fork linux-X.Y.Z-<target>-arkify:copr-<target>   # the release gesture
 1. `scripts/detect.sh` — statelessly compares the highest
    `linux-X.Y.Z-<target>-arkify` branch against
    [kernel.org/releases.json](https://www.kernel.org/releases.json) for each
-   target's `SERIES`.
+   target's `SERIES`. A stable point release is queued **only once knurd42's
+   `arkify-infra-stable-X.Y` branch exists** — the sign that the Fedora ark
+   infrastructure can build that series. Until then a "waiting for ark infra"
+   issue holds the rebase and later runs proceed automatically the day the
+   branch appears, so we never rush ahead of the ark infra. (Deliberately NOT
+   gated on the kernel series Fedora itself ships: our one branch feeds F44,
+   F45 and rawhide chroots, which span multiple series, and a newer stable
+   kernel on older Fedora userspace is exactly the kernel-vanilla use case.
+   The gate applies to forced dispatches too — to truly override it, run the
+   SOP by hand.)
 2. `scripts/rebase-target.sh` — SOP §2–§3: rebase the patch stack onto the new
    tag (conflict ⇒ open an issue, touch nothing), seed the infra branch from the
    same-target predecessor, run arkify, verify the SOP §8 checklist, smoke-test
@@ -51,6 +60,7 @@ Everything reports through issues in this repo:
 | COPR build **failed** | one issue per failed *rebase* — “\[target\] Kernel Release vX.Y.Z failed to build” — collecting every failed build of that release (first in the body, later ones as comments, deduplicated by build id). Solve and close it manually; a further failure of the same release reopens it, a different release opens a fresh issue |
 | rebase conflict / rebase job failure | issue with the conflicting files, plus GitHub’s built-in failed-scheduled-workflow email |
 | new upstream series appeared | notify-only issue |
+| point release held for ark infra | "waiting for arkify-infra-stable-X.Y" issue; resolves itself on a later run, close it once the build lands |
 | deploy key stopped authenticating | issue from the daily health probe |
 
 Successful rebases show up as the green run’s job summary and, once COPR
