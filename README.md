@@ -41,6 +41,22 @@ git push fork linux-X.Y.Z-<target>-arkify:copr-<target>   # the release gesture
 new-series bring-up (SOP §7; then bump `SERIES` in `targets/<target>.env`),
 upstream patch-stack resyncs, and any rebase conflict.
 
+## Notifications
+
+Everything reports through issues in this repo:
+
+| event | channel |
+|---|---|
+| latest COPR build status, both targets | the persistent **“COPR build dashboard”** issue — body edited in place every 6h by [copr-watch](.github/workflows/copr-watch.yml); a comment (→ notification) is added only on state changes, so each build success/failure pings exactly once |
+| COPR build **failed** | additionally its own issue, deduplicated by build id, with failed chroots + log links |
+| rebase conflict / rebase job failure | issue with the conflicting files, plus GitHub’s built-in failed-scheduled-workflow email |
+| new upstream series appeared | notify-only issue |
+| deploy key stopped authenticating | issue from the daily health probe |
+
+Successful rebases show up as the green run’s job summary and, once COPR
+finishes, as a dashboard transition comment. The copr-watch workflow needs no
+credentials — the COPR API is public.
+
 ## Setup
 
 - [config.env](config.env) — `KERNEL_REPO_SLUG` names the kernel repository

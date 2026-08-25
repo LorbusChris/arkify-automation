@@ -1,0 +1,22 @@
+name: copr-watch
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"   # kernel builds take 1-3h; 6h granularity is plenty
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: copr-watch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/copr-watch.sh
