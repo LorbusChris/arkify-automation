@@ -93,6 +93,11 @@ jobs:
           NEW_VERSION: ${{ matrix.version }}
           OLD_VERSION: ${{ matrix.old }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          # COPR's *custom* webhook for this target's kernel package. Needed
+          # because the GitHub webhook ignores force-pushes (empty commit
+          # list) and every release here is a rebase. Contains the project id
+          # and secret, hence a secret.
+          COPR_WEBHOOK: ${{ matrix.target == 'sc7280' && secrets.COPR_WEBHOOK_SC7280 || secrets.COPR_WEBHOOK_SURFACE }}
         run: bash scripts/rebase-target.sh
       - name: open issue on failure
         if: failure()

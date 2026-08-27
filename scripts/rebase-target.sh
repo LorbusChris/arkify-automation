@@ -260,8 +260,33 @@ else
     # non-fast-forward from the second release onward - which is exactly how
     # the 7.2.1 ship failed. --force-with-lease still refuses if someone moved
     # the branch since our clone.
-    say "ship: consumption branch $CONSUMPTION (triggers COPR)"
+    say "ship: consumption branch $CONSUMPTION"
     git push --force-with-lease="refs/heads/$CONSUMPTION" \
         origin "$ship_ref:refs/heads/$CONSUMPTION"
+
+    # Trigger the build explicitly via COPR's *custom* webhook.
+    #
+    # The GitHub webhook cannot do this for us: COPR decides which packages a
+    # push affects with commits_belong_to_package(), which iterates the
+    # payload's commit list - and GitHub sends "commits": [] for a force-push
+    # whose new head is not a descendant of the old one. Every release here is
+    # a fresh rebase, so every consumption push is exactly that shape: COPR
+    # answers 200 and builds nothing. The custom webhook has no commit
+    # matching; it just rebuilds the named package from its committish, which
+    # we have just moved. Verified: 7.2.1 builds 10912398 / 10912399.
+    if [ -n "${COPR_WEBHOOK:-}" ]; then
+        say "triggering the COPR build (custom webhook)"
+        code=$(curl -sS -X POST -o /tmp/copr-trigger.out -w '%{http_code}' "$COPR_WEBHOOK") || true
+        if [ "$code" = "200" ]; then
+            say "COPR build queued: $(cat /tmp/copr-trigger.out)"
+        else
+            echo "COPR custom webhook returned HTTP $code:"; head -c 400 /tmp/copr-trigger.out
+            echo; echo "The branches are pushed and correct - only the build trigger failed."
+            echo tooling > "$FAILKIND_OUT"; exit 3
+        fi
+    else
+        echo "WARNING: COPR_WEBHOOK unset - branches pushed but no build triggered."
+        echo "Trigger manually: copr-cli build-package $COPR_PROJECT --name kernel"
+    fi
 fi
 say "done: $NEW_PIN ($new_patches patches + import), NVR kernel-$NEW_VERSION-$rhrel$localver"

@@ -13,14 +13,25 @@ Read that first; this repo is just SOP §2–§3 run by cron.
 
 ## How it works
 
-**Builds** need no credentials here: each COPR package's committish is a stable
-*consumption branch*, and a GitHub webhook on the kernel repo notifies COPR on
-push. COPR only rebuilds when the pushed ref ends with the committish
-(`packages_logic.py: ref.endswith(committish)`), so pushing a version-pinned
-branch never triggers anything — only the consumption push does:
+**Builds**: each COPR package's committish is a stable *consumption branch*
+(`copr-sc7280` / `copr-surface`) which every release force-updates to the new
+pinned branch, and the build is then triggered explicitly via COPR's **custom**
+webhook.
+
+It has to be the custom webhook, not the GitHub one. COPR decides which
+packages a push affects with `commits_belong_to_package()`, which iterates the
+payload's commit list — and GitHub sends `"commits": []` for a force-push whose
+new head is not a descendant of the old one. Every release here is a fresh
+rebase, so every consumption push is exactly that shape: COPR answers 200 and
+builds nothing. The custom webhook has no commit matching and simply rebuilds
+the named package from its committish.
+
+Shipping by hand is therefore two steps:
 
 ```
-git push fork linux-X.Y.Z-<target>-arkify:copr-<target>   # the release gesture
+git push --force-with-lease=refs/heads/copr-<target> \
+    fork linux-X.Y.Z-<target>-arkify:refs/heads/copr-<target>
+curl -X POST "$COPR_WEBHOOK"        # the custom webhook for that package
 ```
 
 **Rebases** run from [.github/workflows/rebase.yml](.github/workflows/rebase.yml)
