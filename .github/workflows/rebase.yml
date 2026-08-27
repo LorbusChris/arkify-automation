@@ -94,17 +94,24 @@ jobs:
           OLD_VERSION: ${{ matrix.old }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: bash scripts/rebase-target.sh
-      - name: open issue on rebase conflict
+      - name: open issue on failure
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          title="[${{ matrix.target }}] ${{ matrix.version }} rebase needs a human"
+          # Title by failure kind. A patch conflict is yours; a tooling failure
+          # is ours, and saying "rebase needs a human" for both once sent two
+          # issues blaming a rebase that had actually applied cleanly.
+          case "$(cat failkind.txt 2>/dev/null)" in
+            conflict) title="[${{ matrix.target }}] ${{ matrix.version }} rebase needs a human (patch conflict)" ;;
+            tooling)  title="[${{ matrix.target }}] ${{ matrix.version }} blocked by an arkify-automation bug" ;;
+            *)        title="[${{ matrix.target }}] ${{ matrix.version }} rebase job failed" ;;
+          esac
           # exact-title match via the list API - the search API's index lags
           exists=$(gh issue list -R "$GITHUB_REPOSITORY" --state open -L 500 --json title |
                    T="$title" python3 -c 'import json,os,sys; print(sum(1 for i in json.load(sys.stdin) if i["title"] == os.environ["T"]))')
           if [ "$exists" = "0" ]; then
-            { cat conflict.txt 2>/dev/null || echo "No conflict details captured - see the workflow log."; \
+            { cat conflict.txt 2>/dev/null || echo "No detail captured - see the workflow log."; \
               echo; echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; } |
             gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file -
           fi

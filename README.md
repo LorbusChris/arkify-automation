@@ -8,9 +8,8 @@ Automates kernel point-release rebases and COPR builds for the arkify targets in
 | sc7280 | Fairphone 5 | aarch64 | [@mobility/sc7280](https://copr.fedorainfracloud.org/coprs/g/mobility/sc7280/) | `copr-sc7280` |
 | surface | Microsoft Surface | x86_64 | [@mobility/surface](https://copr.fedorainfracloud.org/coprs/g/mobility/surface/) | `copr-surface` |
 
-The manual procedure this encodes is `docs/arkify-sop.md` on the kernel repo's
-`arkify-local-infra-*` branches. Read that first; this repo is just SOP §2–§3
-run by cron.
+The manual procedure this encodes is [docs/arkify-sop.md](docs/arkify-sop.md).
+Read that first; this repo is just SOP §2–§3 run by cron.
 
 ## How it works
 
@@ -45,6 +44,13 @@ git push fork linux-X.Y.Z-<target>-arkify:copr-<target>   # the release gesture
    same-target predecessor, run arkify, verify the SOP §8 checklist, smoke-test
    `make dist-srpm`, then push the pinned + infra branches and fast-forward the
    consumption branch — which triggers the COPR build via webhook.
+3. `scripts/apply-infra-settings.sh` — our packaging settings
+   (`RELEASED_KERNEL`, `override UPSTREAM_BRANCH`, `DISTLOCALVERSION`,
+   `RHEL_RELEASE`, `.copr/Makefile`) applied as an idempotent **end state**
+   rather than carried as a patch for arkify to replay. Replaying them
+   conflicted the moment the ark-infra era changed (mainline → stable-X.Y),
+   which is what blocked 7.2.1; an applied state cannot conflict. Per-target
+   values come from `targets/<target>.env`.
 
 **Stays manual** (the workflow only opens notify issues):
 new-series bring-up (SOP §7; then bump `SERIES` in `targets/<target>.env`),

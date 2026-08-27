@@ -13,12 +13,17 @@
 #   Auth: SSH deploy key for the kernel repo, configured by the workflow
 #   (key file + GIT_SSH_COMMAND). Deploy keys do not expire.
 #
-# Exit codes: 0 ok, 2 rebase conflict (details in $GITHUB_WORKSPACE/conflict.txt),
-#             1 anything else. Runs on Fedora only (arkify requirement).
+# Exit codes: 0 ok
+#             2 real patch conflict - needs a human, SOP §2
+#             3 tooling failure in this automation - the patch stack is likely fine
+#             1 anything else
+# On 2 and 3 the detail lands in $GITHUB_WORKSPACE/conflict.txt and the kind in
+# failkind.txt, so the workflow can title the issue honestly.
+# Runs on Fedora only (arkify requirement).
 set -euo pipefail
 say() { echo "==> $*"; }
 
-: "${TARGET:?}" "${NEW_VERSION:?}" "${OLD_VERSION:?}" "${CONSUMPTION:?}"
+: "${TARGET:?}" "${NEW_VERSION:?}" "${OLD_VERSION:?}" "${CONSUMPTION:?}" "${RHEL_RELEASE:?}"
 # precedence: environment > config.env > built-in default
 _slug_override=${KERNEL_REPO_SLUG:-}
 # shellcheck disable=SC1091
@@ -28,6 +33,9 @@ KERNEL_PUSH_URL=${KERNEL_PUSH_URL:-git@github.com:$KERNEL_REPO_SLUG}
 DRY_RUN=${DRY_RUN:-false}
 WORKDIR=${WORKDIR:-$PWD/kwork}
 CONFLICT_OUT=${GITHUB_WORKSPACE:-$PWD}/conflict.txt
+FAILKIND_OUT=${GITHUB_WORKSPACE:-$PWD}/failkind.txt
+RUNLOG=$(mktemp)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # tag name: vX.Y for X.Y.0, else vX.Y.Z
 ver_tag() { case "$1" in *.*.0) echo "v${1%.0}";; *) echo "v$1";; esac; }
@@ -41,8 +49,14 @@ NEW_PIN=linux-$NEW_VERSION-$TARGET-arkify
 OLD_INFRA=arkify-local-infra-$OLD_PIN
 NEW_INFRA=arkify-local-infra-$NEW_PIN
 
-say "clone (blobless, full history)"
-git clone --filter=blob:none "$KERNEL_PUSH_URL" "$WORKDIR"
+# A full clone, deliberately: NOT --filter=blob:none. A blobless clone makes
+# the kernel repo the promisor for missing blobs, but the new release tag is
+# fetched from git.kernel.org when the fork does not carry it yet - so the
+# rebase asks the promisor for blobs it has never seen and dies with
+# "upload-pack: not our ref". Lazy blob fetching also stalled a run for 74
+# minutes between two steps. A plain clone is both correct and faster here.
+say "clone (full history and blobs)"
+git clone "$KERNEL_PUSH_URL" "$WORKDIR"
 cd "$WORKDIR"
 git config user.name  "arkify-automation"
 git config user.email "arkify-automation@noreply.github.com"
@@ -63,15 +77,32 @@ say "old stack: $old_patches patches ($old_seps separators) on $OLD_TAG"
 
 say "SOP §2: rebase the patch stack onto $NEW_TAG (no --empty=drop)"
 git checkout -q -b "$NEW_PIN" "origin/$OLD_PIN^"
-if ! git rebase --quiet --onto "$NEW_TAG" "$OLD_TAG"; then
+if ! git rebase --onto "$NEW_TAG" "$OLD_TAG" >"$RUNLOG" 2>&1; then
+    # Distinguish a real patch conflict (needs a human, SOP §2) from a tooling
+    # failure (needs a fix here). Reporting every non-zero rebase exit as a
+    # "conflict" once sent two issues blaming a rebase that was actually clean.
+    conflicted=$(git diff --name-only --diff-filter=U)
+    if [ -n "$conflicted" ]; then
+        {
+            echo "Rebase of $TARGET onto $NEW_TAG stopped on real patch conflicts."
+            echo; echo "Conflicting files:"; echo "$conflicted" | sed 's/^/  - /'
+            echo; echo "Run docs/arkify-sop.md §2 manually for this release."
+        } | tee "$CONFLICT_OUT"
+        echo conflict > "$FAILKIND_OUT"
+        git rebase --abort
+        exit 2
+    fi
     {
-        echo "Rebase of $TARGET onto $NEW_TAG stopped on conflicts:"
-        echo; git status --short | grep -E '^(UU|AA|DD|AU|UA|DU|UD)' || git status --short
-        echo; echo "Run docs/arkify-sop.md §2 manually for this release."
+        echo "Rebase of $TARGET onto $NEW_TAG failed WITHOUT any conflicting file."
+        echo "This is a tooling failure in arkify-automation, not a patch conflict -"
+        echo "the patch stack itself may be perfectly fine. git said:"
+        echo; sed 's/^/  /' "$RUNLOG" | tail -25
     } | tee "$CONFLICT_OUT"
-    git rebase --abort
-    exit 2
+    echo tooling > "$FAILKIND_OUT"
+    git rebase --abort 2>/dev/null || true
+    exit 3
 fi
+cat "$RUNLOG"
 
 new_patches=$(git rev-list --count "$NEW_TAG..HEAD")
 new_seps=$(git log --oneline "$NEW_TAG..HEAD" --grep='^-------------' | wc -l)
@@ -94,8 +125,57 @@ git fetch --quiet arkify "refs/tags/arkify-infra-*:refs/tags/arkify-infra-*" \
                          "refs/tags/arkify-fixes-$KIND-*:refs/tags/arkify-fixes-$KIND-*"
 git fetch --quiet arkify
 
-say "run arkify"
-curl --silent 'https://gitlab.com/knurd42/linux/-/raw/arkify-arkify/arkify' | bash
+# Drop the legacy settings commit before arkify rebases the infra branch.
+# Replaying it across an ark-infra era change is what broke 7.2.1: the whole
+# conflict was a comment next to RELEASED_KERNEL, whose value was identical on
+# both sides. The settings are regenerated below from apply-infra-settings.sh,
+# so nothing is lost - config and docs commits still ride along as patches,
+# and they touch files ark does not.
+legacy=$(git log --format='%H %s' "$NEW_INFRA" --grep='^downstream: ark-infra customisation' -1 | cut -d' ' -f1)
+if [ -n "$legacy" ]; then
+    say "dropping legacy settings commit ${legacy:0:12} (regenerated after import)"
+    git checkout -q "$NEW_INFRA"
+    git rebase --quiet --onto "$legacy^" "$legacy" "$NEW_INFRA" || {
+        echo "could not drop the legacy settings commit"; git rebase --abort 2>/dev/null || true; exit 3; }
+    git checkout -q "$NEW_PIN"
+fi
+
+run_arkify() { # arkify runs under set -e; capture failure as a tooling fault
+    if ! curl --silent 'https://gitlab.com/knurd42/linux/-/raw/arkify-arkify/arkify' | bash >"$RUNLOG" 2>&1; then
+        cat "$RUNLOG"
+        {
+            echo "arkify failed for $TARGET on $NEW_TAG. This is an arkify/ark-infra"
+            echo "problem, not a conflict in our kernel patch stack - that rebased"
+            echo "cleanly ($new_patches patches). arkify said:"
+            echo; sed 's/^/  /' "$RUNLOG" | tail -30
+        } | tee "$CONFLICT_OUT"
+        echo tooling > "$FAILKIND_OUT"
+        git rebase --abort 2>/dev/null || true
+        exit 3
+    fi
+    cat "$RUNLOG"
+}
+
+say "run arkify (rebases the infra branch onto the new ark-infra, then imports)"
+run_arkify
+
+say "regenerate downstream settings on the infra branch (idempotent, no patch to conflict)"
+git checkout -q "$NEW_INFRA"
+TARGET="$TARGET" RHEL_RELEASE="$RHEL_RELEASE" bash "$SCRIPT_DIR/apply-infra-settings.sh"
+if ! git diff --quiet -- redhat/Makefile.variables Makefile.rhelver .copr/Makefile; then
+    git add -f redhat/Makefile.variables Makefile.rhelver .copr/Makefile
+    git commit -q -s -m 'downstream: ark-infra customisation for COPR builds
+
+Regenerated by arkify-automation (scripts/apply-infra-settings.sh) rather
+than replayed as a patch, so an ark-infra era change cannot conflict.'
+    say "settings commit regenerated"
+else
+    say "settings already correct on the new base"
+fi
+git checkout -q "$NEW_PIN"
+
+say "re-run arkify to import the regenerated settings"
+run_arkify
 
 say "squash to a single import commit if two accumulated"
 imports=$(git log --format=%s "$NEW_TAG..HEAD" | grep -cx 'bulk import ark-infra')
