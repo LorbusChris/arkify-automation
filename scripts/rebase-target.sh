@@ -49,12 +49,21 @@ NEW_PIN=linux-$NEW_VERSION-$TARGET-arkify
 OLD_INFRA=arkify-local-infra-$OLD_PIN
 NEW_INFRA=arkify-local-infra-$NEW_PIN
 
-# A full clone, deliberately: NOT --filter=blob:none. A blobless clone makes
-# the kernel repo the promisor for missing blobs, but the new release tag is
-# fetched from git.kernel.org when the fork does not carry it yet - so the
-# rebase asks the promisor for blobs it has never seen and dies with
-# "upload-pack: not our ref". Lazy blob fetching also stalled a run for 74
-# minutes between two steps. A plain clone is both correct and faster here.
+# A full clone, deliberately: NOT --filter=blob:none.
+#
+# Correctness: a blobless clone makes this repo the promisor for missing
+# blobs, but the release tag is fetched from git.kernel.org when the fork does
+# not carry it yet, so the rebase asks the promisor for objects it has never
+# seen and dies with "upload-pack: not our ref". That killed the surface job.
+#
+# Speed: counter-intuitively the full clone is much faster end to end. The
+# blobless clone itself is quick (~35s, vs minutes here), but working inside a
+# partial clone made the later `git fetch arkify` pathological - 74 minutes
+# between two adjacent steps. Measured on the 7.2.1 rehearsal, the entire
+# rebase step is 10m29s (sc7280) / 15m21s (surface) with a full clone, against
+# 78+ minutes to merely reach arkify before. Do not "optimise" this back
+# without re-measuring; if you must, multiple promisor remotes
+# (remote.<name>.promisor=true for stable and arkify) is the shape that works.
 say "clone (full history and blobs)"
 git clone "$KERNEL_PUSH_URL" "$WORKDIR"
 cd "$WORKDIR"
