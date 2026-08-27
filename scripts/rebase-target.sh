@@ -231,9 +231,37 @@ else
         git push origin "refs/remotes/stable/linux-$SERIES.y:refs/heads/linux-$SERIES.y" ||
             echo "WARNING: mirror refresh of linux-$SERIES.y failed (diverged?); continuing"
     fi
-    say "ship: pinned + infra branches, then the consumption branch (triggers COPR)"
-    git push origin "refs/heads/$NEW_PIN:refs/heads/$NEW_PIN" \
-                    "refs/heads/$NEW_INFRA:refs/heads/$NEW_INFRA"
-    git push origin "refs/heads/$NEW_PIN:refs/heads/$CONSUMPTION"
+    # Idempotent re-run: if this release was already published (a previous run
+    # got this far and then failed later), keep the published commits rather
+    # than force-pushing freshly rebased ones with the same trees but new
+    # SHAs - the consumption branch should point at history people may already
+    # have fetched.
+    ship_ref=refs/heads/$NEW_PIN
+    published=$(git ls-remote origin "refs/heads/$NEW_PIN" | cut -f1)
+    if [ -n "$published" ]; then
+        git fetch --quiet origin "refs/heads/$NEW_PIN:refs/remotes/origin/$NEW_PIN" || true
+        if [ "$(git rev-parse "origin/$NEW_PIN^{tree}")" = "$(git rev-parse "$NEW_PIN^{tree}")" ]; then
+            say "$NEW_PIN already published with an identical tree - reusing it"
+            ship_ref=refs/remotes/origin/$NEW_PIN
+        else
+            echo "$NEW_PIN already exists on origin with a DIFFERENT tree - refusing to overwrite"
+            echo "published $published, local $(git rev-parse "$NEW_PIN")"
+            echo tooling > "$FAILKIND_OUT"; exit 3
+        fi
+    else
+        say "ship: pinned + infra branches"
+        git push origin "refs/heads/$NEW_PIN:refs/heads/$NEW_PIN" \
+                        "refs/heads/$NEW_INFRA:refs/heads/$NEW_INFRA"
+    fi
+
+    # The consumption branch is a POINTER to the current release, not a history:
+    # each release is a fresh rebase, so its commits are never descendants of
+    # the previous release's. A plain push is therefore always rejected as
+    # non-fast-forward from the second release onward - which is exactly how
+    # the 7.2.1 ship failed. --force-with-lease still refuses if someone moved
+    # the branch since our clone.
+    say "ship: consumption branch $CONSUMPTION (triggers COPR)"
+    git push --force-with-lease="refs/heads/$CONSUMPTION" \
+        origin "$ship_ref:refs/heads/$CONSUMPTION"
 fi
 say "done: $NEW_PIN ($new_patches patches + import), NVR kernel-$NEW_VERSION-$rhrel$localver"
