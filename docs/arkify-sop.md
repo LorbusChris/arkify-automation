@@ -256,12 +256,20 @@ make NO_CONFIGCHECKS=1 DIST=.fc$(rpm -E %fedora) dist-srpm
 | `redhat/Makefile.variables` | `DISTLOCALVERSION` | `.sc7280` | `.surface` |
 | `redhat/Makefile.variables` | `override UPSTREAM_BRANCH` | `$(MARKER)` | `$(MARKER)` |
 | `redhat/Makefile.variables` | `RELEASED_KERNEL` | `1` (pinned, see seeding trap) | `1` |
-| `Makefile.rhelver` | `RHEL_RELEASE` | `1001` | pick a distinct value |
+| `Makefile.rhelver` | `RHEL_RELEASE` | `1000` | `1000` (same is fine) |
 | `redhat/configs/**` | one file per `CONFIG_*` symbol | FP5 hardware | Surface hardware |
 | `.copr/Makefile` | git identity, `DIST` | shared | shared |
 
 arkify seeds `DISTLOCALVERSION` from `whoami` — always fix it, or your RPMs are
 named after your login.
+
+`RHEL_RELEASE` is a **floor, not an identity**. It only has to sort above
+Fedora's own kernel release numbers (`200.fc44`, `61.fc45`) so ours wins for the
+same kernel version — `1000` does that with room to spare. Targets do not need
+different values: `DISTLOCALVERSION`, the arch and the separate COPR repo
+already keep them apart. Raise it only to force a rebuild of a kernel version
+that has already shipped, since for an unchanged version a *lower* number is an
+rpm downgrade.
 
 Keep `.copr/Makefile`'s dist dynamic so one branch builds on any Fedora release:
 
