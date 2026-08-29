@@ -68,7 +68,7 @@ jobs:
       group: rebase-${{ matrix.target }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:44
+    container: registry.fedoraproject.org/fedora:latest
     steps:
       - name: install build deps (the proven .copr/Makefile set + tooling)
         run: >

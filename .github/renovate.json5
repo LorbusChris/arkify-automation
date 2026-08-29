@@ -3,26 +3,24 @@
   extends: [
     'config:best-practices',
   ],
-  // actions/checkout and friends get sha-pinned and bumped; the Fedora
-  // container in rebase.yml gets version PRs (44 -> 45) without daily
-  // digest churn -- the same rule bluespin's config uses. The kernel
-  // itself needs no Renovate: release detection and rebasing are this
-  // repo's own job.
+  // actions/checkout and friends get sha-pinned and bumped.
+  //
+  // The Fedora container in rebase.yml is deliberately NOT managed: it floats
+  // on :latest. Nothing here is tied to a particular Fedora release - arkify
+  // only requires "a Fedora", every build dependency is installed explicitly
+  // in the job, and the dist tag of the shipped RPMs comes from the COPR
+  // chroots (f44/f45/rawhide), not from this container. The previous rule
+  // tried to suppress only digest pinning and did not match anyway, so PR #16
+  // still arrived proposing a digest-pinned :46.
+  //
+  // The kernel needs no Renovate either: release detection and rebasing are
+  // this repo's own job (scripts/detect.sh against kernel.org).
   packageRules: [
     {
+      matchPackageNames: [
+        'registry.fedoraproject.org/fedora',
+      ],
       enabled: false,
-      matchUpdateTypes: [
-        'digest',
-        'pinDigest',
-        'pin',
-      ],
-      matchDepTypes: [
-        'container',
-      ],
-      matchFileNames: [
-        '.github/workflows/**.yaml',
-        '.github/workflows/**.yml',
-      ],
     },
   ],
 }
